@@ -1,20 +1,15 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View, Text, FlatList, Pressable, StyleSheet,
-  Image, TextInput, BackHandler, Dimensions,
+  Image, TextInput, BackHandler, ActivityIndicator,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
-import { xtream } from '../services/xtream';
-import { getXtreamStreamUrl } from '../services/xtream';
+import { xtream, getXtreamStreamUrl } from '../services/xtream';
 import { useAuth } from '../context/AuthContext';
-import LoadingSpinner from '../components/LoadingSpinner';
-import { truncate } from '../utils/helpers';
 
-const { width } = Dimensions.get('window');
-const CARD_W = 140;
-const CARD_H = 200;
-const NUM_COLS = Math.floor((width - 180 - 48) / (CARD_W + 12));
+const CARD_W = 130;
+const CARD_H = 190;
 
 function MovieCard({ item, onPress }) {
   const [focused, setFocused] = useState(false);
@@ -35,62 +30,82 @@ function MovieCard({ item, onPress }) {
       <LinearGradient colors={['transparent', 'rgba(3,3,8,0.98)']} style={styles.cardGrad} />
       <View style={styles.cardInfo}>
         <Text style={styles.cardTitle} numberOfLines={2}>{item.name}</Text>
-        {item.rating && <Text style={styles.cardRating}>★ {parseFloat(item.rating || 0).toFixed(1)}</Text>}
+        {item.rating ? <Text style={styles.cardRating}>★ {parseFloat(item.rating).toFixed(1)}</Text> : null}
       </View>
       {focused && <View style={styles.focusRing} />}
     </Pressable>
   );
 }
 
+function CategoryItem({ item, isSelected, onPress }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <Pressable
+      onPress={onPress}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      style={[styles.catBtn, isSelected && styles.catBtnActive, focused && styles.catBtnFocused]}
+    >
+      <Text style={[styles.catBtnText, isSelected && styles.catBtnTextActive]} numberOfLines={2}>
+        {item.category_name}
+      </Text>
+    </Pressable>
+  );
+}
+
 export default function MoviesScreen({ navigation }) {
   const { xtreamConfig } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [movies, setMovies] = useState([]);
   const [categories, setCategories] = useState([]);
-  const [filtered, setFiltered] = useState([]);
+  const [movies, setMovies] = useState([]);
   const [selectedCat, setSelectedCat] = useState(null);
   const [search, setSearch] = useState('');
+  const [loadingCats, setLoadingCats] = useState(true);
+  const [loadingMovies, setLoadingMovies] = useState(false);
+  const searchRef = useRef('');
 
   useFocusEffect(
     useCallback(() => {
-      load();
+      loadCategories();
       const sub = BackHandler.addEventListener('hardwareBackPress', () => { navigation.goBack(); return true; });
       return () => sub.remove();
     }, [])
   );
 
-  const load = async () => {
-    setLoading(true);
+  const loadCategories = async () => {
+    setLoadingCats(true);
     try {
-      const [cats, vods] = await Promise.all([
-        xtream.getVODCategories(),
-        xtream.getVODStreams(),
-      ]);
+      const cats = await xtream.getVODCategories();
       setCategories(cats);
-      setMovies(vods);
-      setFiltered(vods);
+      if (cats.length) {
+        setSelectedCat(cats[0].category_id);
+        loadMoviesForCategory(cats[0].category_id);
+      }
     } catch (e) {
-      console.warn('Movies load error:', e.message);
+      console.warn('Movies categories error:', e.message);
     } finally {
-      setLoading(false);
+      setLoadingCats(false);
     }
   };
 
-  const filterMovies = useCallback((catId, q) => {
-    let result = movies;
-    if (catId) result = result.filter(m => m.category_id === catId);
-    if (q) result = xtream.search(result, q);
-    setFiltered(result);
-  }, [movies]);
-
-  const handleCat = (catId) => {
-    setSelectedCat(catId);
-    filterMovies(catId, search);
+  const loadMoviesForCategory = async (categoryId) => {
+    setLoadingMovies(true);
+    setMovies([]);
+    setSearch('');
+    searchRef.current = '';
+    try {
+      const vods = await xtream.getVODStreams(categoryId);
+      setMovies(vods);
+    } catch (e) {
+      console.warn('Movies load error:', e.message);
+    } finally {
+      setLoadingMovies(false);
+    }
   };
 
-  const handleSearch = (q) => {
-    setSearch(q);
-    filterMovies(selectedCat, q);
+  const handleCatSelect = (catId) => {
+    if (catId === selectedCat) return;
+    setSelectedCat(catId);
+    loadMoviesForCategory(catId);
   };
 
   const handlePlay = (item) => {
@@ -99,11 +114,18 @@ export default function MoviesScreen({ navigation }) {
     navigation.navigate('Player', { stream: { ...item, streamType: 'vod', url } });
   };
 
-  if (loading) return (
-    <View style={styles.loadingWrap}>
-      <LoadingSpinner size={52} label="Loading movies..." />
-    </View>
-  );
+  const filtered = search
+    ? movies.filter(m => (m.name || '').toLowerCase().includes(search.toLowerCase()))
+    : movies;
+
+  if (loadingCats) {
+    return (
+      <View style={styles.fullCenter}>
+        <ActivityIndicator color="#00f0ff" size="large" />
+        <Text style={styles.loadingText}>Loading categories...</Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -115,49 +137,56 @@ export default function MoviesScreen({ navigation }) {
         <Text style={styles.sideTitle}>MOVIES</Text>
         <Text style={styles.sideCount}>{filtered.length} titles</Text>
         <View style={styles.sideDivider} />
-        <Pressable
-          onPress={() => handleCat(null)}
-          style={[styles.catBtn, !selectedCat && styles.catBtnActive]}
-        >
-          <Text style={[styles.catBtnText, !selectedCat && styles.catBtnTextActive]}>All Movies</Text>
-        </Pressable>
-        {categories.slice(0, 20).map(cat => (
-          <Pressable
-            key={cat.category_id}
-            onPress={() => handleCat(cat.category_id)}
-            style={[styles.catBtn, selectedCat === cat.category_id && styles.catBtnActive]}
-          >
-            <Text style={[styles.catBtnText, selectedCat === cat.category_id && styles.catBtnTextActive]} numberOfLines={1}>
-              {cat.category_name}
-            </Text>
-          </Pressable>
-        ))}
+        <FlatList
+          data={categories}
+          keyExtractor={item => String(item.category_id)}
+          renderItem={({ item }) => (
+            <CategoryItem
+              item={item}
+              isSelected={selectedCat === item.category_id}
+              onPress={() => handleCatSelect(item.category_id)}
+            />
+          )}
+          showsVerticalScrollIndicator={false}
+          initialNumToRender={20}
+          maxToRenderPerBatch={20}
+          windowSize={5}
+        />
       </View>
 
-      {/* Main */}
+      {/* Main grid */}
       <View style={styles.main}>
-        {/* Search bar */}
         <View style={styles.searchBar}>
           <TextInput
             style={styles.searchInput}
             value={search}
-            onChangeText={handleSearch}
-            placeholder="Search movies..."
+            onChangeText={setSearch}
+            placeholder="Search in category..."
             placeholderTextColor="rgba(255,255,255,0.2)"
           />
         </View>
 
-        <FlatList
-          data={filtered}
-          numColumns={NUM_COLS}
-          keyExtractor={item => String(item.stream_id)}
-          renderItem={({ item }) => (
-            <MovieCard item={item} onPress={() => handlePlay(item)} />
-          )}
-          contentContainerStyle={styles.grid}
-          columnWrapperStyle={NUM_COLS > 1 ? styles.row : undefined}
-          showsVerticalScrollIndicator={false}
-        />
+        {loadingMovies ? (
+          <View style={styles.fullCenter}>
+            <ActivityIndicator color="#00f0ff" size="large" />
+            <Text style={styles.loadingText}>Loading movies...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={filtered}
+            numColumns={Math.floor((require('react-native').Dimensions.get('window').width - 200 - 32) / (CARD_W + 12))}
+            keyExtractor={item => String(item.stream_id)}
+            renderItem={({ item }) => (
+              <MovieCard item={item} onPress={() => handlePlay(item)} />
+            )}
+            contentContainerStyle={styles.grid}
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={20}
+            maxToRenderPerBatch={20}
+            windowSize={5}
+            removeClippedSubviews
+          />
+        )}
       </View>
     </View>
   );
@@ -165,75 +194,46 @@ export default function MoviesScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#030308', flexDirection: 'row' },
-  loadingWrap: { flex: 1, backgroundColor: '#030308', alignItems: 'center', justifyContent: 'center' },
+  fullCenter: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { color: 'rgba(255,255,255,0.4)', fontSize: 13 },
   sidebar: {
-    width: 180,
-    backgroundColor: '#050510',
-    borderRightWidth: 1,
-    borderRightColor: 'rgba(0,240,255,0.08)',
-    paddingTop: 16,
-    paddingHorizontal: 12,
+    width: 180, backgroundColor: '#050510',
+    borderRightWidth: 1, borderRightColor: 'rgba(0,240,255,0.08)',
+    paddingTop: 16, paddingHorizontal: 10,
   },
-  backBtn: { marginBottom: 16 },
+  backBtn: { marginBottom: 12 },
   backText: { color: '#00f0ff', fontSize: 13, fontWeight: '700' },
-  sideTitle: { color: '#ffffff', fontSize: 18, fontWeight: '900', letterSpacing: 2, marginBottom: 4 },
-  sideCount: { color: 'rgba(0,240,255,0.5)', fontSize: 11, marginBottom: 12 },
-  sideDivider: { height: 1, backgroundColor: 'rgba(0,240,255,0.08)', marginBottom: 12 },
-  catBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 8,
-    marginBottom: 2,
-  },
-  catBtnActive: { backgroundColor: 'rgba(0,240,255,0.1)', borderLeftWidth: 2, borderLeftColor: '#00f0ff' },
-  catBtnText: { color: 'rgba(255,255,255,0.4)', fontSize: 12, fontWeight: '600' },
+  sideTitle: { color: '#fff', fontSize: 16, fontWeight: '900', letterSpacing: 2, marginBottom: 4 },
+  sideCount: { color: 'rgba(0,240,255,0.5)', fontSize: 11, marginBottom: 10 },
+  sideDivider: { height: 1, backgroundColor: 'rgba(0,240,255,0.08)', marginBottom: 8 },
+  catBtn: { paddingVertical: 9, paddingHorizontal: 8, borderRadius: 8, marginBottom: 2, borderLeftWidth: 2, borderLeftColor: 'transparent' },
+  catBtnActive: { backgroundColor: 'rgba(0,240,255,0.08)', borderLeftColor: '#00f0ff' },
+  catBtnFocused: { backgroundColor: 'rgba(0,240,255,0.12)', borderLeftColor: '#00f0ff' },
+  catBtnText: { color: 'rgba(255,255,255,0.4)', fontSize: 11, fontWeight: '600' },
   catBtnTextActive: { color: '#00f0ff' },
-  main: { flex: 1, paddingTop: 0 },
-  searchBar: {
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0,240,255,0.08)',
-  },
+  main: { flex: 1 },
+  searchBar: { paddingHorizontal: 16, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(0,240,255,0.08)' },
   searchInput: {
     backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,240,255,0.15)',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    color: '#ffffff',
-    fontSize: 14,
+    borderWidth: 1, borderColor: 'rgba(0,240,255,0.15)',
+    borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8,
+    color: '#fff', fontSize: 13,
   },
-  grid: { padding: 16, paddingBottom: 40 },
-  row: { gap: 12, marginBottom: 12 },
+  grid: { padding: 12, paddingBottom: 40, gap: 12 },
   card: {
-    width: CARD_W,
-    height: CARD_H,
-    borderRadius: 10,
-    overflow: 'hidden',
+    width: CARD_W, height: CARD_H,
+    borderRadius: 10, overflow: 'hidden',
     backgroundColor: '#0d0d1a',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.06)',
+    margin: 6,
   },
-  cardFocused: {
-    borderColor: '#00f0ff',
-    shadowColor: '#00f0ff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.6,
-    shadowRadius: 12,
-    elevation: 10,
-  },
+  cardFocused: { borderColor: '#00f0ff', shadowColor: '#00f0ff', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 12, elevation: 10 },
   cardPoster: { ...StyleSheet.absoluteFillObject },
-  cardPlaceholder: {
-    backgroundColor: '#0a0a1f',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderLetter: { color: 'rgba(0,240,255,0.3)', fontSize: 48, fontWeight: '900' },
+  cardPlaceholder: { backgroundColor: '#0a0a1f', alignItems: 'center', justifyContent: 'center' },
+  placeholderLetter: { color: 'rgba(0,240,255,0.3)', fontSize: 42, fontWeight: '900' },
   cardGrad: { position: 'absolute', bottom: 0, left: 0, right: 0, height: '50%' },
   cardInfo: { position: 'absolute', bottom: 8, left: 8, right: 8 },
-  cardTitle: { color: '#ffffff', fontSize: 11, fontWeight: '700', lineHeight: 15 },
-  cardRating: { color: 'rgba(0,240,255,0.7)', fontSize: 10, marginTop: 2 },
+  cardTitle: { color: '#fff', fontSize: 10, fontWeight: '700', lineHeight: 14 },
+  cardRating: { color: 'rgba(0,240,255,0.7)', fontSize: 9, marginTop: 2 },
   focusRing: { ...StyleSheet.absoluteFillObject, borderWidth: 2, borderColor: '#00f0ff', borderRadius: 10 },
 });

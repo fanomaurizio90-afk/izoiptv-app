@@ -170,14 +170,23 @@ export default function HomeScreen({ navigation }) {
     try {
       // Refresh config from server on each load
       await refreshConfig();
-      const [live, vod, ser] = await Promise.allSettled([
-        xtream.getLiveStreams(),
-        xtream.getVODStreams(),
-        xtream.getSeries(),
+      // Only load first category of each type — never load full 27k+ playlists on home
+      const [liveCats, vodCats, serCats] = await Promise.allSettled([
+        xtream.getLiveCategories(),
+        xtream.getVODCategories(),
+        xtream.getSeriesCategories(),
       ]);
-      if (live.status === 'fulfilled') setLiveChannels(live.value.slice(0, 100));
-      if (vod.status === 'fulfilled') setMovies(vod.value.slice(0, 60));
-      if (ser.status === 'fulfilled') setSeries(ser.value.slice(0, 60));
+      const firstLiveCat = liveCats.status === 'fulfilled' && liveCats.value?.[0]?.category_id;
+      const firstVodCat  = vodCats.status === 'fulfilled'  && vodCats.value?.[0]?.category_id;
+      const firstSerCat  = serCats.status === 'fulfilled'  && serCats.value?.[0]?.category_id;
+      const [live, vod, ser] = await Promise.allSettled([
+        firstLiveCat ? xtream.getLiveStreams(firstLiveCat) : Promise.resolve([]),
+        firstVodCat  ? xtream.getVODStreams(firstVodCat)   : Promise.resolve([]),
+        firstSerCat  ? xtream.getSeries(firstSerCat)       : Promise.resolve([]),
+      ]);
+      if (live.status === 'fulfilled') setLiveChannels(live.value.slice(0, 30));
+      if (vod.status === 'fulfilled')  setMovies(vod.value.slice(0, 20));
+      if (ser.status === 'fulfilled')  setSeries(ser.value.slice(0, 20));
     } catch (e) {
       console.warn('Failed to load content:', e.message);
     } finally {
