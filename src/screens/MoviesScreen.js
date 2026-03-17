@@ -8,6 +8,18 @@ import { useFocusEffect } from '@react-navigation/native';
 import { xtream, getXtreamStreamUrl } from '../services/xtream';
 import { useAuth } from '../context/AuthContext';
 
+// Some Xtream servers return objects or wrapped arrays instead of plain arrays
+function toArray(data) {
+  if (!data) return [];
+  if (Array.isArray(data)) return data;
+  if (typeof data === 'object') {
+    // Handles { "0": {...}, "1": {...} } style responses
+    const values = Object.values(data);
+    if (values.length && typeof values[0] === 'object') return values;
+  }
+  return [];
+}
+
 const CARD_W = 130;
 const CARD_H = 190;
 
@@ -74,7 +86,8 @@ export default function MoviesScreen({ navigation }) {
   const loadCategories = async () => {
     setLoadingCats(true);
     try {
-      const cats = await xtream.getVODCategories();
+      const raw = await xtream.getVODCategories();
+      const cats = toArray(raw);
       setCategories(cats);
       if (cats.length) {
         setSelectedCat(cats[0].category_id);
@@ -93,8 +106,20 @@ export default function MoviesScreen({ navigation }) {
     setSearch('');
     searchRef.current = '';
     try {
-      const vods = await xtream.getVODStreams(categoryId);
-      setMovies(vods);
+      const raw = await xtream.getVODStreams(categoryId);
+      const vods = toArray(raw);
+      // If server returned 0 for this category, try without category filter
+      if (vods.length === 0) {
+        const allRaw = await xtream.getVODStreams(null);
+        const all = toArray(allRaw);
+        // Filter client-side if we got results without category filter
+        const filtered = categoryId
+          ? all.filter(v => String(v.category_id) === String(categoryId))
+          : all;
+        setMovies(filtered.length > 0 ? filtered : all.slice(0, 200));
+      } else {
+        setMovies(vods);
+      }
     } catch (e) {
       console.warn('Movies load error:', e.message);
     } finally {

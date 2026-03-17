@@ -5,6 +5,7 @@ import {
   BackHandler, Platform,
 } from 'react-native';
 import LinearGradient from 'react-native-linear-gradient';
+import Svg, { Polygon, Defs, LinearGradient as SvgGradient, Stop, Circle } from 'react-native-svg';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../context/AuthContext';
 import { daysUntil, isExpiringSoon } from '../utils/helpers';
@@ -30,41 +31,101 @@ const C = {
   dark2:     '#0a0a1f',
 };
 
-// ─── IZO HEX LOGO (replicates the hexagonal logo from izoiptv.com) ────────────
+// ─── IZO HEX LOGO — true SVG hexagon matching izoiptv.com ────────────────────
 function IZOLogo({ size = 52 }) {
   const pulse = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     Animated.loop(
       Animated.sequence([
-        Animated.timing(pulse, { toValue: 0.7, duration: 2000, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1,   duration: 2000, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.5, duration: 2500, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 1,   duration: 2500, useNativeDriver: true }),
       ])
     ).start();
   }, []);
 
+  // Flat-top hexagon points for a size×size viewBox
+  // cx=50 cy=50, r=46 (outer), r=41 (inner fill)
+  const hexPoints = (cx, cy, r) => {
+    return Array.from({ length: 6 }, (_, i) => {
+      const angle = (Math.PI / 180) * (60 * i - 30); // flat-top: start at -30°
+      return `${cx + r * Math.cos(angle)},${cy + r * Math.sin(angle)}`;
+    }).join(' ');
+  };
+
+  const outerPts = hexPoints(50, 50, 46);
+  const innerPts = hexPoints(50, 50, 41);
+
+  // Vertex accent dots (outer ring)
+  const dots = Array.from({ length: 6 }, (_, i) => {
+    const angle = (Math.PI / 180) * (60 * i - 30);
+    return { cx: 50 + 46 * Math.cos(angle), cy: 50 + 46 * Math.sin(angle) };
+  });
+
   return (
-    <View style={{ width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
-      {/* Outer hex border (approximated with rotated square + corner radius) */}
-      <View style={[styles.hexOuter, { width: size, height: size, borderRadius: size * 0.28 }]}>
-        <LinearGradient
-          colors={[C.cyan, C.purple]}
-          start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-          style={StyleSheet.absoluteFillObject}
+    <View style={{ width: size, height: size }}>
+      {/* Ambient glow behind hex */}
+      <Animated.View style={{
+        position: 'absolute',
+        width: size * 1.4, height: size * 1.4,
+        borderRadius: size * 0.7,
+        backgroundColor: C.cyan,
+        opacity: pulse,
+        top: -size * 0.2, left: -size * 0.2,
+        // React Native shadow for glow effect
+        shadowColor: C.cyan,
+        shadowOffset: { width: 0, height: 0 },
+        shadowOpacity: 0.3,
+        shadowRadius: size * 0.25,
+      }} />
+
+      {/* SVG hex */}
+      <Svg width={size} height={size} viewBox="0 0 100 100">
+        <Defs>
+          <SvgGradient id="hexBorder" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0%" stopColor="#00f0ff" />
+            <Stop offset="55%" stopColor="#7c3aed" />
+            <Stop offset="100%" stopColor="#a855f7" />
+          </SvgGradient>
+          <SvgGradient id="hexFill" x1="0" y1="0" x2="1" y2="1">
+            <Stop offset="0%" stopColor="#050c14" />
+            <Stop offset="100%" stopColor="#030308" />
+          </SvgGradient>
+        </Defs>
+
+        {/* Outer hex border */}
+        <Polygon
+          points={outerPts}
+          fill="url(#hexBorder)"
+          stroke="none"
         />
+        {/* Inner dark fill */}
+        <Polygon
+          points={innerPts}
+          fill="url(#hexFill)"
+          stroke="none"
+        />
+        {/* Vertex accent dots */}
+        {dots.map((d, i) => (
+          <Circle
+            key={i}
+            cx={d.cx} cy={d.cy} r={3}
+            fill={i < 3 ? '#00f0ff' : '#a855f7'}
+            opacity={0.9}
+          />
+        ))}
+      </Svg>
+
+      {/* IZO text — layered over the SVG */}
+      <View style={{ position: 'absolute', width: size, height: size, alignItems: 'center', justifyContent: 'center' }}>
+        <Text style={[styles.hexText, {
+          fontSize: size * 0.34,
+          textShadowColor: C.cyan,
+          textShadowOffset: { width: 0, height: 0 },
+          textShadowRadius: size * 0.15,
+        }]}>IZO</Text>
+        <Text style={[styles.hexSubText, { fontSize: size * 0.13, letterSpacing: size * 0.06 }]}>IPTV</Text>
       </View>
-      {/* Inner dark fill */}
-      <View style={[styles.hexInner, {
-        width: size - 3, height: size - 3, borderRadius: (size - 3) * 0.28,
-      }]} />
-      {/* Glow pulse */}
-      <Animated.View style={[
-        styles.hexGlow,
-        { width: size + 8, height: size + 8, borderRadius: (size + 8) * 0.3, opacity: pulse },
-      ]} />
-      {/* IZO text */}
-      <Text style={[styles.hexText, { fontSize: size * 0.32 }]}>IZO</Text>
-      <Text style={[styles.hexSubText, { fontSize: size * 0.14 }]}>IPTV</Text>
     </View>
   );
 }

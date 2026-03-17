@@ -131,7 +131,12 @@ export default function LiveTVScreen({ navigation }) {
       'live',
       'ts'
     );
-    navigation.navigate('Player', { stream: { ...channel, streamType: 'live', url } });
+    const channelIndex = channels.findIndex(c => c.stream_id === channel.stream_id);
+    navigation.navigate('Player', {
+      stream: { ...channel, streamType: 'live', url },
+      channels,
+      channelIndex,
+    });
   };
 
   if (loadingCats) {
