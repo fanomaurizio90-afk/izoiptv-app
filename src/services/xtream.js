@@ -3,9 +3,18 @@ import { storage } from './storage';
 
 let xtreamClient = null;
 
+function normaliseServer(server) {
+  let s = (server || '').trim().replace(/\/+$/, ''); // strip trailing slashes
+  if (s && !s.startsWith('http://') && !s.startsWith('https://')) {
+    s = 'http://' + s;
+  }
+  return s;
+}
+
 export function initXtream(server, username, password) {
+  const baseURL = normaliseServer(server);
   xtreamClient = axios.create({
-    baseURL: server,
+    baseURL,
     timeout: 20000,
     params: { username, password },
   });
@@ -19,12 +28,14 @@ export function initXtream(server, username, password) {
 }
 
 export function getXtreamStreamUrl(server, username, password, streamId, streamType = 'live', ext = 'ts') {
-  return `${server}/${streamType}/${username}/${password}/${streamId}.${ext}`;
+  const s = normaliseServer(server);
+  return `${s}/${streamType}/${username}/${password}/${streamId}.${ext}`;
 }
 
 export const xtream = {
   async authenticate(server, username, password) {
-    const res = await axios.get(`${server}/player_api.php`, {
+    const s = normaliseServer(server);
+    const res = await axios.get(`${s}/player_api.php`, {
       params: { username, password },
       timeout: 10000,
     });
